@@ -7,7 +7,7 @@
 | مشخصه | مقدار |
 | :--- | :--- |
 | **نام پروژه** | یکپارچه‌سازی سامانه اعتباری و کالابرگ فارا/شما (`mahak.service`) |
-| **نسخه سند** | 1.0.0 |
+| **نسخه سند** | 1.1.0 |
 | **وضعیت سند** | نهایی و مصوب (Approved) |
 | **مخاطبان** | معماران نرم‌افزار، توسعه‌دهندگان دات‌نت، مدیران فنی، تیم تضمین کیفیت (QA) |
 | **زبان سند** | فارسی فنی (همراه با اصطلاحات تخصصی انگلیسی) |
@@ -18,9 +18,9 @@
 ## ۱. مقدمه و هدف (Introduction & Scope)
 
 ### ۱.۱. هدف سند (Purpose)
-این سند، معماری فنی و جزئیات پیاده‌سازی سرویس پس‌زمینه ویندوز تحت عنوان **`mahak.service`** را تشریح می‌کند. این سرویس به عنوان لایه میان‌افزار (Middleware) و واسط ارتباطی امن میان نرم‌افزار فروشگاهی/صندوق محک و وب‌سرویس‌های **سامانه شبکه ملی اعتبار ایرانیان (فارا / شما)** جهت پردازش تراکنش‌های مبتنی بر طرح کالابرگ الکترونیکی، اعتبارات رفاهی و یارانه‌ای عمل می‌کند.
+این سند، معماری فنی و جزئیات پیاده‌سازی سرویس پس‌زمینه ویندوز تحت عنوان **`mahak.service`** را تشریح می‌کند. این سرویس به عنوان لایه میان‌افزار محلی (Local Middleware) و واسط ارتباطی امن میان نرم‌افزار فروشگاهی/صندوق محک و وب‌سرویس‌های **سامانه شبکه ملی اعتبار ایرانیان (فارا / شما)** جهت پردازش تراکنش‌های مبتنی بر طرح کالابرگ الکترونیکی، اعتبارات رفاهی و یارانه‌ای عمل می‌کند.
 
-### ۱.۲. دامنه کاربرد (Scope)
+### ۱.۲. دامنه شمول درون‌سیستمی (In-Scope)
 سرویس `mahak.service` مسئولیت‌های زیر را بر عهده دارد:
 1. **مدیریت چرخه عمر تراکنش‌های اعتباری ۳ مرحله‌ای (3-Step Stateful Lifecycle)**: ثبت سفارش اقلام (`ItemOrder`)، استعلام تخصیص اعتبار و سهم خریدار/یارانه (`PurchaseInquiry`) و تایید نهایی سفارش پس از اخذ تراکنش بانکی (`ConfirmOrder`).
 2. **پشتیبانی از فرایند خرید بدون کارت (OTP/Cardless)**: ایجاد جلسه خرید با شماره ملی/موبایل و دریافت رمز یکبار مصرف.
@@ -30,48 +30,59 @@
 6. **مغایرت‌گیری و مدیریت زمان Cut-off**: مدیریت بازه‌های زمانی قطعی/تسویه روزانه (ساعت ۰۰:۰۰ و ۰۱:۰۰ بامداد) و اجرای سرویس‌های تسویه و تطبیق تراکنش‌ها (Reconciliation Jobs).
 7. **پایداری، قابلیت اطمینان و لاگینگ**: نگهداری تاریخچه جامع تراکنش‌ها شامل `orderTrace`، `RRN`، `STAN`، `TerminalId` و لاگینگ ساختاریافته (Structured Logging).
 
+### ۱.۳. خارج از دامنه کاربرد (Out-of-Scope)
+به منظور تفکیک شفاف مسئولیت‌ها (Separation of Concerns)، موارد زیر صراحتاً **خارج از وظایف `mahak.service`** بوده و توسط سایر ماژول‌های سیستم فروشگاهی یا سخت‌افزارهای جانبی انجام می‌پذیرد:
+- **ارتباط مستقیم پروتکلی با سوئیچ بانکی/شاپرک (ISO 8583)**: ارتباط مستقیم با سوئیچ شاپرک توسط پایانه کارتخوان (POS) یا ماژول PC-POS صندوق انجام می‌شود؛ `mahak.service` صرفاً نتایج تراکنش بانکی (`RRN` و `STAN`) را جهت تایید فارا دریافت می‌نماید.
+- **رابط کاربری صندوق (POS UI & Presentation)**: طراحی فرم‌ها، تعامل با صندوقدار و نمایش پیام‌ها بر عهده کلاینت صندوق محک است.
+- **فرمان‌های چاپ فیزیکی فاکتور و درایور چاپگر**: مدیریت چاپگر رسید و طراحی قالب چاپ فاکتور در کلاینت صندوق انجام می‌شود.
+- **مدیریت موجودی کالا و اسناد حسابداری کلان**: ثبت آرتیکل‌های دوبل حسابداری و انبارداری در هسته ERP/نرم‌افزار مالی محک صورت می‌گیرد و این سرویس صرفاً مبالغ تسهیم‌شده (یارانه و نقدی) را گزارش می‌کند.
+
 ---
 
 ## ۲. نمای کلی اکوسیستم و معماری سیستم (System Architecture Overview)
 
-### ۲.۱. توپولوژی و اجزای تعاملی
-سرویس `mahak.service` به عنوان یک Windows Service در محیط محلی صندوق یا سرور فروشگاه اجرا شده و از یک سو با نرم‌افزار صندوق فروشگاهی (POS/Client UI) و از سوی دیگر از طریق کانال امن HTTPS با سرورهای سامانه فارا/شما و شبکه پرداخت (شاپرک/PSP) در ارتباط است.
+### ۲.۱. نمودار معماری تعاملی و توپولوژی سیستم (Mermaid Architecture Diagram)
 
-```
-+-----------------------------------------------------------------------+
-|                       فروشگاه / سرور محلی محک                        |
-|                                                                       |
-|  +---------------------+         IPC / HTTP API (REST)                |
-|  |   صندوق فروشگاهی   | <=======================> +----------------+ |
-|  |  (Mahak POS Client) |                           |  mahak.service | |
-|  +---------------------+                           | (Win Service)  | |
-|            |                                       +-------+--------+ |
-|            | (پرداخت بانکی / کارتخوان POS)                |        | |
-|            v                                               |        | |
-|  +---------------------+                                   |        | |
-|  |     دستگاه POS      |                                   |        | |
-|  |   بانکی (شاپرک)     |                                   |        | |
-|  +---------------------+                                   |        | |
-|                                                            |        | |
-|  +---------------------+        +--------------------+     |        | |
-|  |   Local Database    | <====> |   DPAPI Protected  |     |        | |
-|  |  (SQLite / MSSQL)   |        |    Configuration   |     |        | |
-|  +---------------------+        +--------------------+     |        | |
-+------------------------------------------------------------+--------+-+
-                                                             |
-                                            HTTPS (TLS 1.2+) | JWT Bearer
-                                                             v
-                                        +-------------------------------+
-                                        |    سامانه شبکه ملی اعتبار     |
-                                        |         (فارا / شما)          |
-                                        +-------------------------------+
+```mermaid
+flowchart TB
+    subgraph POS_Host["رایانه صندوق فروشگاهی محک (POS Station)"]
+        direction TB
+        ClientUI["🖥️ نرم‌افزار صندوق محک<br/>(Mahak POS Client UI)"]
+        
+        subgraph WinService["⚙️ سرویس ویندوزی mahak.service (.NET Worker)"]
+            direction TB
+            LocalAPI["🌐 Local Minimal API<br/>(localhost:5143)"]
+            WorkflowMgr["🔀 Workflow & State Engine<br/>(3-Step Orchestration)"]
+            TokenMgr["🔑 TokenManager<br/>(MemoryCache + SemaphoreSlim)"]
+            FaraClient["📡 FaraHttpClient<br/>(Polly Resilience Policies)"]
+            LocalAPI --> WorkflowMgr
+            WorkflowMgr --> TokenMgr
+            WorkflowMgr --> FaraClient
+        end
+        
+        LocalDB[("💾 پایگاه داده محلی<br/>(SQLite / MSSQL Express)<br/>OrderTransactions & AuditLogs")]
+        DPAPI["🔒 Windows DPAPI<br/>(LocalMachine Protected Secrets)"]
+        
+        ClientUI <-->|"HTTP / REST (JSON)"| LocalAPI
+        WorkflowMgr <--> LocalDB
+        WinService <-->|"ProtectedData"| DPAPI
+    end
+
+    subgraph External_Systems["سامانه‌ها و سرویس‌های بیرونی"]
+        direction TB
+        FaraCloud["☁️ سرورهای سامانه شبکه ملی اعتبار<br/>(فارا / شما - API Gateway)"]
+        ShaparakNetwork["💳 شبکه پرداخت شاپرک / PSP<br/>(کارتخوان متصل PC-POS)"]
+    end
+
+    FaraClient <-->|"HTTPS (TLS 1.2+) / JWT Bearer"| FaraCloud
+    ClientUI <-->|"پروتکل محلی کارتخوان (RS232/LAN)"| ShaparakNetwork
 ```
 
 ### ۲.۲. مؤلفه‌های داخلی `mahak.service`
-سرویس بر پایه معماری ماژولار و لایه‌ای (Clean / Layered Architecture) در دات‌نت طراحی شده است:
+سرویس بر پایه معماری لایه‌ای و ماژولار (Clean / Layered Architecture) در دات‌نت پیاده‌سازی می‌شود:
 
-1. **Host & Runtime Layer (`Mahak.Service.Host`)**: پیاده‌سازی شده با `IHostedService` و `BackgroundService` سازگار با Windows Service Lifecycle.
-2. **API / Endpoint Layer (`Mahak.Service.Api`)**: هاست کردن یک Minimal API سبک محلی (مانند Kestrel روی پورت اختصاصی محلی، مثلاً `localhost:5143`) جهت دریافت فرامین از صندوق محک.
+1. **Host & Runtime Layer (`Mahak.Service.Host`)**: پیاده‌سازی شده با `IHostedService` و `BackgroundService` سازگار با چرخه حیات Windows Service.
+2. **API / Endpoint Layer (`Mahak.Service.Api`)**: هاست کردن یک Minimal API سبک محلی روی پورت اختصاصی `localhost:5143` جهت ارتباط سریع و کم‌تاخیر با صندوق محک.
 3. **Core Workflow & Orchestration Layer (`Mahak.Service.Core`)**:
    - `OrderWorkflowManager`: مدیریت ماشین حالت ۳ مرحله‌ای سفارش‌ها.
    - `OtpWorkflowManager`: مدیریت فرایند خرید بدون کارت.
@@ -80,7 +91,7 @@
    - `FaraHttpClient`: ارتباط با اندپوینت‌های فارا با استفاده از `IHttpClientFactory` و سیاست‌های انعطاف‌پذیری `Polly`.
    - `TokenManager`: مدیریت توکن JWT، کش هوشمند و تمدید خودکار.
 5. **Security & Cryptography Layer (`Mahak.Service.Security`)**:
-   - `DpapiDataProtector`: رمزنگاری و رمزگشایی اعتبارسنجی‌ها با `DataProtectionScope.LocalMachine` یا `CurrentUser`.
+   - `DpapiDataProtector`: رمزنگاری و رمزگشایی اعتبارسنجی‌ها با `DataProtectionScope.LocalMachine`.
 6. **Data & Persistence Layer (`Mahak.Service.Data`)**:
    - لایه دسترسی به داده (Dapper یا EF Core) جهت ثبت و استعلام `OrderTransactions`، `AuditLogs`، `ReconciliationBatch`.
 7. **Background Schedulers (`Mahak.Service.Jobs`)**:
@@ -88,27 +99,37 @@
 
 ---
 
-## ۳. نیازمندی‌های تابعی و جریان‌های کسب‌وکار (Functional Workflows)
+## ۳. خلاصه اندپوینت‌های وب‌سرویس فارا (Fara API Endpoint Summary)
 
-### ۳.۱. چرخه عمر تراکنش‌های اعتباری ۳ مرحله‌ای (3-Step Stateful Lifecycle)
+جدول زیر تمامی اندپوینت‌های اصلی سامانه شبکه ملی اعتبار (فارا / شما) را که توسط کلاینت `FaraHttpClient` فراخوانی می‌شوند خلاصه می‌کند:
+
+| نام عملیات | HTTP Method + Path | توضیح کوتاه عملکرد | فیلدهای کلیدی ورودی (Request) | فیلدهای کلیدی خروجی (Response) |
+| :--- | :--- | :--- | :--- | :--- |
+| **احراز هویت و اخذ توکن** | `POST /api/v1/auth/login` | دریافت توکن JWT معتبر برای ۲۴ ساعت با شناسه پذیرنده | `clientId`, `clientSecret`, `terminalId` | `token`, `expiresIn`, `tokenType` |
+| **ثبت اقلام سبد کالا** | `POST /api/v1/orders/items` | ارسال بارکدها و قیمت اقلام جهت صدور شناسه سفارش | `items` (لیست `barcode`, `quantity`, `price`), `totalAmount` | `orderTrace`, `status`, `expiresAt` |
+| **استعلام اعتبار با کارت** | `POST /api/v1/orders/inquiry` | استعلام مانده اعتبار سرپرست خانوار و تفکیک سهم یارانه | `orderTrace`, `cardNumber` (یا هش کارت), `terminalId` | `subsidizedAmount`, `cashAmount`, `reserveId` |
+| **تولید جلسه رمز یکبار مصرف** | `POST /api/v1/otp/generate` | درخواست صدور پیامک رمز موقت برای خرید بدون کارت | `nationalCode`, `mobileNumber`, `terminalId` | `sessionId`, `validDuration` (معمولاً ۱۲۰ ثانیه) |
+| **استعلام اعتبار با OTP** | `POST /api/v1/orders/inquiry-otp` | استعلام اعتبار کالابرگ با استفاده از کد پیامک‌شده | `orderTrace`, `sessionId`, `otpCode` | `subsidizedAmount`, `cashAmount`, `reserveId` |
+| **تایید نهایی سفارش** | `POST /api/v1/orders/confirm` | اعلام وصول سهم نقدی از شاپرک و نهایی‌سازی تسویه | `orderTrace`, `rrn`, `stan`, `paidAmount`, `terminalId` | `confirmReference`, `status`, `settlementDate` |
+| **لغو و انصراف از سفارش** | `POST /api/v1/orders/cancel` | آزادسازی اعتبار رزروشده در صورت انصراف خریدار | `orderTrace`, `reasonCode` | `status`, `releasedAmount` |
+| **برگشت تراکنش (اصلاحیه)** | `POST /api/v1/orders/reverse` | برگشت تراکنش در صورت خطای چاپگر یا تایم‌اوت بعد از تایید | `orderTrace`, `rrn`, `stan`, `reverseReason` | `reverseReference`, `status` |
+| **استعلام وضعیت تراکنش** | `GET /api/v1/orders/{orderTrace}/status` | استعلام آخرین وضعیت تراکنش‌های بلاتکلیف یا قطعی | `orderTrace` (Path Parameter) | `status`, `subsidizedAmount`, `cashAmount`, `rrn` |
+| **مغایرت‌گیری دسته‌ای** | `POST /api/v1/settlement/reconciliation` | ارسال لیست تراکنش‌های روز جهت تطبیق و کشف مغایرت | `terminalId`, `fromDate`, `toDate`, `transactions` | `matchedCount`, `discrepancies` (لیست مغایرت‌ها) |
+
+---
+
+## ۴. نیازمندی‌های تابعی و ماشین وضعیت تراکنش‌ها (Functional Workflows & State Machine)
+
+### ۴.۱. چرخه عمر تراکنش‌های اعتباری ۳ مرحله‌ای (3-Step Stateful Lifecycle)
 
 سامانه فارا نیازمند اجرای تراکنش در ۳ گام متوالی و مقید به وضعیت (Stateful) است:
 
-```
-[گام ۱: ثبت اقلام سبد]
-       ItemOrder
-           │
-           ▼
-[گام ۲: استعلام اعتبار و سهم یارانه]
-    PurchaseInquiry ──(کسر از اعتبار در سامانه فارا)
-           │
-           ├────────────────────────────┐
-           ▼                            ▼
-[تراکنش موفق شاپرک/نقدی]    [انصراف کاربر / خطای شاپرک]
-           │                            │
-           ▼                            ▼
-[گام ۳: تایید نهایی]                 [لغو سفارش]
-      ConfirmOrder                  Cancel / Reverse
+```mermaid
+flowchart LR
+    Step1["گام اول: ItemOrder<br/>(ثبت بارکدها و مبالغ)"] -->|"تولید orderTrace"| Step2["گام دوم: PurchaseInquiry<br/>(استعلام و رزرو سهم یارانه)"]
+    Step2 -->|"پرداخت سهم نقدی در شاپرک"| Step3["گام سوم: ConfirmOrder<br/>(ارسال RRN/STAN و قطعی‌سازی)"]
+    Step2 -->|"انصراف مشتری / خطای شاپرک"| Cancel["لغو و آزادسازی: CancelOrder"]
+    Step3 -->|"خطای چاپ / خرابی سخت‌افزار"| Reverse["برگشت تراکنش: ReverseOrder"]
 ```
 
 #### گام اول: ثبت سفارش اقلام (`ItemOrder`)
@@ -118,9 +139,7 @@
 - **عملیات داخلی**: ایجاد رکورد تراکنش در وضعیت `ItemOrderCreated` همراه با `orderTrace` و زمان ثبت.
 
 #### گام دوم: استعلام خرید و تسهیم سهم اعتباری (`PurchaseInquiry`)
-- **هدف**: بررسی میزان اعتبار موجود در کارت یا حساب سرپرست خانوار و تفکیک مبالغ قابل پرداخت از طریق:
-  1. سهم یارانه/اعتبار حمایتی (Subsidized Credit).
-  2. سهم نقدی خریدار (Customer Cash/Card Share).
+- **هدف**: بررسی میزان اعتبار موجود در کارت یا حساب سرپرست خانوار و تفکیک مبالغ قابل پرداخت از طریق سهم یارانه (Subsidized Credit) و سهم نقدی خریدار (Customer Cash/Card Share).
 - **اطلاعات ارسالی**: `orderTrace`، شماره کارت (یا شناسه OTP)، مبلغ کل و اطلاعات ترمینال.
 - **خروجی فارا**: مبالغ تایید شده اعتباری، مبلغ مانده نقدی و وضعیت رزرو موقت اعتبار.
 - **تغییر وضعیت محلی**: تغییر وضعیت به `InquiryReserved`؛ در این لحظه سهم نقدی به صندوقدار اعلام می‌شود تا از طریق کارتخوان شاپرک دریافت گردد.
@@ -133,8 +152,22 @@
 
 ---
 
-### ۳.۲. جریان تراکنش‌های بدون کارت (Cardless / OTP Flow)
-در مواردی که سرپرست خانوار کارت فیزیکی بانکی همراه ندارد:
+### ۴.۲. جدول خلاصه وضعیت‌های تراکنش (Transaction States Summary)
+
+| کد وضعیت | عنوان وضعیت | شرح وضعیت و محل رخداد | اقدامات مجاز بعدی |
+| :--- | :--- | :--- | :--- |
+| `None` (0) | ایجاد اولیه | تراکنش در حافظه صندوق تشکیل شده اما به فارا ارسال نشده است. | فراخوانی `ItemOrder` |
+| `ItemOrderCreated` (1) | اقلام ثبت‌شده | اقلام به فارا ارسال شده و `orderTrace` دریافت و در دیتابیس ثبت شده است. | `PurchaseInquiry`، `CancelOrder` |
+| `InquiryReserved` (2) | اعتبار رزروشده | استعلام کارت/OTP موفق بوده، سهم یارانه مسدود شده و منتظر تراکنش شاپرک است. | `ConfirmOrder`، `CancelOrder` |
+| `Confirmed` (3) | تایید و قطعی‌شده | سهم نقدی دریافت شده، تاییدیه فارا اخذ شده و فاکتور نهایی چاپ گردیده است. | `ReverseOrder` (در صورت خطای فیزیکی) |
+| `CancelledByUser` (4) | لغو توسط کاربر | خریدار انصراف داده یا موجودی کارت کافی نبوده؛ اعتبار در فارا آزاد شده است. | وضعیت نهایی (Terminal State) |
+| `Reversed` (5) | برگشت‌خورده | تراکنش بانکی یا فارا با ارسال درخواست اصلاحیه به طور کامل ابطال شده است. | وضعیت نهایی (Terminal State) |
+| `ExpiredTimeout` (6) | منقضی‌شده | تراکنش در گام ۲ بیش از سقف مجاز (مثلاً ۳ دقیقه) معلق مانده و توسط Sweeper لغو شده است. | وضعیت نهایی (Terminal State) |
+| `StuckNeedManual` (7) | بلاتکلیف نیازمند بررسی | ناهماهنگی میان شاپرک و فارا که پس از چند مرحله Retry حل نشده و نیاز به مداخله دارد. | بررسی دستی در پنل مغایرت‌گیری |
+
+---
+
+### ۴.۳. جریان تراکنش‌های بدون کارت (Cardless / OTP Flow)
 1. **درخواست ایجاد جلسه OTP (`GenerateOtp`)**: ارسال کد ملی سرپرست خانوار و شماره تلفن همراه متصل به سامانه شما.
 2. **ارسال پیامک از سوی فارا/شما**: رمز یکبار مصرف مستقیم برای سرپرست خانوار پیامک می‌شود.
 3. **استعلام با OTP (`PurchaseInquiryWithOtp`)**: صندوقدار رمز ارسالی را در سیستم درج کرده و به عنوان کلید تایید در متد `PurchaseInquiry` ارسال می‌نماید.
@@ -142,85 +175,65 @@
 
 ---
 
-### ۳.۳. مدیریت خطاهای حین تراکنش، لغو و اصلاح (Cancel & Reverse Operations)
+## ۵. طراحی مدیریت احراز هویت و توکن (Authentication & Token Management)
 
-#### ۱. عملیات انصراف قبل از پرداخت (`CancelOrder`)
-- **سناریو**: پس از اجرای `PurchaseInquiry` و کسر موقت اعتبار، خریدار منصرف شده یا موجودی کارت بانکی او برای پرداخت سهم نقدی کافی نیست.
-- **اکشن**: فراخوانی بلافاصله متد `CancelOrder` با پارامتر `orderTrace` جهت آزادسازی اعتبار مسدود شده خریدار در سامانه فارا.
-- **وضعیت محلی**: تبدیل به `CancelledByUser`.
-
-#### ۲. عملیات برگشت تراکنش (`ReverseOrder`)
-- **سناریو**: خطای ارتباطی (Network Timeout) در حین `ConfirmOrder` یا خطای دستگاه چاپگر پس از تراکنش شاپرک.
-- **اکشن**: ارسال درخواست `ReverseOrder` با ذکر `orderTrace`، `RRN` و دلیل بازگشت.
-- **وضعیت محلی**: تبدیل به `Reversed`.
-
-#### ۳. استعلام وضعیت تراکنش‌های بلاتکلیف (`StatusInquiry`)
-- **سناریو**: قطع برق یا کرش ناگهانی سیستم حین پردازش گام ۳.
-- **اکشن**: در زمان راه‌اندازی مجدد سرویس یا توسط Job دوره‌ای، تراکنش‌هایی که در وضعیت `InquiryReserved` بیش از ۲ دقیقه باقی مانده‌اند، استعلام شده و در صورت نیاز `Cancel` یا `Reverse` می‌شوند.
-
----
-
-## ۴. طراحی مدیریت احراز هویت و توکن (Authentication & Token Management)
-
-### ۴.۱. الزامات امنیتی توکن فارا
+### ۵.۱. الزامات امنیتی توکن فارا
 - وب‌سرویس فارا از پروتکل احراز هویت مبتنی بر **JSON Web Token (JWT)** استفاده می‌کند.
 - مدت اعتبار هر توکن صادر شده **۲۴ ساعت (۸۶۴۰۰ ثانیه)** است.
-- **ممنوعیت قطعی**: اکیداً نباید به ازای هر تراکنش درخواست لاگین (`/api/v1/auth/login`) ارسال شود؛ این کار منجر به Rate-Limit، انسداد IP و ایجاد تاخیر شدید در صندوق خواهد شد.
+- **ممنوعیت قطعی**: اکیداً نباید به ازای هر تراکنش درخواست لاگین ارسال شود؛ این کار منجر به Rate-Limit، انسداد IP و ایجاد تاخیر شدید در صندوق خواهد شد.
 
-### ۴.۲. معماری کشینگ توکن (`TokenManager`)
+### ۵.۲. معماری کشینگ توکن (`TokenManager`)
 - **مکانیزم کش**: استفاده از `IMemoryCache` با کلید یکتا و مدیریت همزمانی با `SemaphoreSlim(1, 1)` (جلوگیری از Thundering Herd Problem).
 - **حاشیه ایمنی انقضا (Safety Buffer)**: توکن با مدت زمان ۲۳ ساعت و ۴۵ دقیقه کش می‌شود (۱۵ دقیقه قبل از انقضای واقعی تمدید می‌شود).
-- **مکانیزم Retry بر روی ۴۰۱**: چنانچه سرور فارا خطای `401 Unauthorized` بازگرداند، کش به صورت خودکار ابطال (Evict) شده، توکن تازه دریافت می‌شود و درخواست اصلی دقیقاً ۱ بار مجدداً ارسال می‌گردد.
+- **مکانیزم خودترمیمی (Self-Healing) بر روی ۴۰۱**: چنانچه سرور فارا خطای `401 Unauthorized` بازگرداند، کش به صورت خودکار ابطال (Evict) شده، توکن تازه دریافت می‌شود و درخواست اصلی دقیقاً ۱ بار مجدداً ارسال می‌گردد.
 
-```
-       [درخواست به API فارا]
-                 │
-                 ▼
-     [آیا توکن معتبر در کش وجود دارد؟]
-           /            \
-       (بله)           (خیر / منقضی)
-         │                │
-         │                ▼
-         │     [ورود به SemaphoreSlim(1,1)]
-         │                │
-         │                ▼
-         │     [استعلام مجدد از کش (Double-Check)]
-         │                │
-         │        (اگر نبود) ──> [فراخوانی Login API]
-         │                              │
-         │                              ▼
-         │                     [ذخیره در IMemoryCache]
-         │                     (مدت: ۲۳ ساعت و ۴۵ دقیقه)
-         │                              │
-         │                     [خروج از Semaphore]
-         │                              │
-         └──────────────┬───────────────┘
-                        ▼
-            [افزودن Authorization Header]
-                        │
-                        ▼
-            [ارسال درخواست HTTPS به فارا]
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Request as درخواست تراکنش (Worker Thread)
+    participant TokenMgr as TokenManager
+    participant Cache as IMemoryCache
+    participant Lock as SemaphoreSlim(1,1)
+    participant FaraAuth as /api/v1/auth/login
+
+    Request->>TokenMgr: GetAccessTokenAsync()
+    TokenMgr->>Cache: آیا توکن معتبر موجود است؟
+    alt توکن معتبر در کش موجود است
+        Cache-->>TokenMgr: بازگشت JWT Token
+        TokenMgr-->>Request: استفاده از توکن کش‌شده
+    else توکن وجود ندارد یا منقضی شده است
+        TokenMgr->>Lock: WaitAsync() (اخذ انحصاری قفل)
+        TokenMgr->>Cache: بررسی مجدد (Double-Check Locking)
+        alt اگر همچنان خالی بود
+            TokenMgr->>FaraAuth: POST لاگین با ClientId/ClientSecret
+            FaraAuth-->>TokenMgr: توکن ۲۴ ساعته JWT
+            TokenMgr->>Cache: ذخیره با زمان ۲۳ ساعت و ۴۵ دقیقه
+        end
+        TokenMgr->>Lock: Release() (آزادسازی قفل)
+        TokenMgr-->>Request: بازگشت توکن جدید
+    end
 ```
 
 ---
 
-## ۵. معماری حفاظت از اطلاعات با Windows DPAPI
+## ۶. معماری حفاظت از اطلاعات با Windows DPAPI
 
-### ۵.۱. چرایی استفاده از DPAPI
-اطلاعات حساس شامل نام‌کاربری، کلمه‌عبور وب‌سرویس فارا، شناسه پذیرنده (`TerminalId`/`AcceptorCode`) و کلیدهای دسترسی نباید به صورت متن خام (Plaintext) در `appsettings.json` ذخیره شوند. 
+### ۶.۱. چرایی استفاده از DPAPI
+اطلاعات حساس شامل نام‌کاربری، کلمه‌عبور وب‌سرویس فارا، شناسه پذیرنده (`TerminalId`/`AcceptorCode`) و کلیدهای دسترسی نباید به صورت متن خام (Plaintext) در `appsettings.json` ذخیره شوند.
 
-### ۵.۲. نحوه پیاده‌سازی
+### ۶.۲. نحوه پیاده‌سازی
 سرویس `mahak.service` با استفاده از فضای نام `System.Security.Cryptography.ProtectedData` مقادیر حساس را رمزنگاری می‌کند:
-- **دامنه رمزنگاری (Scope)**: `DataProtectionScope.LocalMachine` (قابل دسترسی برای اکانت‌های سرویس و ادمین‌های همان سیستم) یا `DataProtectionScope.CurrentUser` برای اکانت اختصاصی سرویس `NT SERVICE\mahak.service`.
+- **دامنه رمزنگاری (Scope)**: `DataProtectionScope.LocalMachine` (قابل دسترسی برای اکانت‌های سرویس و ادمین‌های همان سیستم).
 - **ابزار پیکربندی اولیه**: ارائه یک ابزار خط فرمان ساده (`mahak.config.exe --encrypt`) که مقادیر ورودی را رمز کرده و در قالب فایل پیکربندی امن ذخیره می‌کند.
 
 ```csharp
 public static class DpapiHelper
 {
-    private static readonly byte[] OptionalEntropy = Encoding.UTF8.GetBytes("MahakFaraEntropy_V1");
+    private static readonly byte[] OptionalEntropy = Encoding.UTF8.GetBytes("MahakFaraEntropy_V1_2026");
 
     public static string EncryptSecret(string plainText)
     {
+        if (string.IsNullOrEmpty(plainText)) return string.Empty;
         byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
         byte[] cipherBytes = ProtectedData.Protect(
             plainBytes, 
@@ -231,6 +244,7 @@ public static class DpapiHelper
 
     public static string DecryptSecret(string cipherText)
     {
+        if (string.IsNullOrEmpty(cipherText)) return string.Empty;
         byte[] cipherBytes = Convert.FromBase64String(cipherText);
         byte[] plainBytes = ProtectedData.Unprotect(
             cipherBytes, 
@@ -243,22 +257,22 @@ public static class DpapiHelper
 
 ---
 
-## ۶. مدل مغایرت‌گیری و مدیریت زمان‌های Cut-off (Reconciliation & Cut-off)
+## ۷. مدل مغایرت‌گیری و مدیریت زمان‌های Cut-off (Reconciliation & Cut-off)
 
-### ۶.۱. بازه‌های زمانی حساس شاپرک و فارا (Cut-off Times)
+### ۷.۱. بازه‌های زمانی حساس شاپرک و فارا (Cut-off Times)
 در شبکه پرداخت و بانکی کشور، دو زمان بحرانی تسویه و بستن حساب وجود دارد:
 1. **ساعت ۰۰:۰۰ (نیمه‌شب)**: پایان روز تقویمی و شیفت تاریخ مالیاتی/فروشگاهی.
 2. **ساعت ۰۱:۰۰ بامداد**: Cut-off تسویه سامانه شاپرک و پردازش صورت‌حساب‌های اعتباری فارا.
 
-### ۶.۲. رفتار سرویس حین زمان Cut-off
-- **قفل موقت تراکنش‌های باز (Graceful Drain)**: در بازه ۰۰:۰۰ تا ۰۰:۰۵ و ۰۱:۰۰ تا ۰۱:۰۵ بامداد، به درخواست‌های جدید `ItemOrder` پاسخ "در حال بستن شیفت روزانه / تسویه پایان روز" داده شده و تراکنش‌های در حال انجام سریعاً تکمیل یا لغو می‌شوند.
+### ۷.۲. رفتار سرویس حین زمان Cut-off
+- **تخلیه نرم تراکنش‌ها (Graceful Drain)**: در بازه ۰۰:۰۰ تا ۰۰:۰۵ و ۰۱:۰۰ تا ۰۱:۰۵ بامداد، به درخواست‌های جدید `ItemOrder` پاسخ "در حال بستن شیفت روزانه / تسویه پایان روز" داده شده و تراکنش‌های در حال انجام سریعاً تکمیل یا لغو می‌شوند.
 - **اجرای جاب مغایرت‌گیری شبانه (`NightlyReconciliationJob`)**:
   - در ساعت ۰۱:۳۰ بامداد، سرویس لیست کلیه تراکنش‌های تایید شده (`Confirmed`) روز گذشته را استخراج کرده و با اندپوینت مغایرت‌گیری وب‌سرویس فارا (`/api/v1/settlement/reconciliation`) تطبیق می‌دهد.
   - هرگونه اختلاف در مبالغ یا وضعیت‌ها در جدول `ReconciliationDiscrepancies` ثبت و آلارم تولید می‌گردد.
 
 ---
 
-## ۷. نیازمندی‌های غیرکاربردی (Non-Functional Requirements - NFRs)
+## ۸. نیازمندی‌های غیرکاربردی (Non-Functional Requirements - NFRs)
 
 | شاخص | الزامات و استانداردها |
 | :--- | :--- |
@@ -271,7 +285,7 @@ public static class DpapiHelper
 
 ---
 
-## ۸. نقشه ساختار پروژه و پکیج‌های دات‌نت (Solution Structure)
+## ۹. نقشه ساختار پروژه و پکیج‌های دات‌نت (Solution Structure)
 
 ```
 Mahak.FaraIntegration/
@@ -288,15 +302,15 @@ Mahak.FaraIntegration/
 
 ---
 
-## ۹. جمع‌بندی و گام‌های بعدی
+## ۱۰. وضعیت مجموعه اسناد فنی و مهندسی پروژه
 
-این سند به عنوان مرجع اصلی معماری (Master Architecture Document) برای طراحی و پیاده‌سازی سرویس `mahak.service` تدوین شده است. در گام‌های بعدی اسناد تکمیلی به ترتیب زیر ارائه خواهند شد:
+تمامی اسناد ۸ گانه طراحی و مهندسی `mahak.service` تدوین شده و در دسترس قرار دارند:
 
-1. ✅ **سند ۱ (همین سند)**: سند جامع طراحی نرم‌افزار (Technical SDD)
-2. ⏳ **سند ۲**: ماشین حالت تفصیلی و نمودارهای توالی (State Machine & Sequence Diagrams با Mermaid)
-3. ⏳ **سند ۳**: مدل داده و ساختار جداول پایگاه داده محلی (Data Model & Database Schema)
-4. ⏳ **سند ۴**: طراحی سیستم احراز هویت و مدیریت توکن (Authentication & Caching Strategy)
-5. ⏳ **سند ۵**: استراتژی مدیریت خطاها و مغایرت‌گیری شبانه (Reconciliation & Error Handling)
-6. ⏳ **سند ۶**: معماری ویندوز سرویس (`BackgroundService`، پیکربندی، لاگینگ و DPAPI)
-7. ⏳ **سند ۷**: چک‌لیست امنیت و تطابق با الزامات شاپرک/فارا
-8. ⏳ **سند ۸**: راهنمای نصب، راه‌اندازی و استقرار سرویس در ویندوز
+1. ✅ **سند شماره ۱ (همین سند)**: سند جامع طراحی نرم‌افزار (Technical SDD v1.1.0)
+2. ✅ **سند شماره ۲**: ماشین حالت تفصیلی و نمودارهای توالی (State Machine & Sequence Diagrams با Mermaid)
+3. ✅ **سند شماره ۳**: مدل داده و ساختار جداول پایگاه داده محلی (Data Model & Database Schema)
+4. ✅ **سند شماره ۴**: طراحی سیستم احراز هویت و مدیریت توکن (Authentication & Caching Strategy)
+5. ✅ **سند شماره ۵**: استراتژی مدیریت خطاها و مغایرت‌گیری شبانه (Reconciliation & Error Handling)
+6. ✅ **سند شماره ۶**: معماری ویندوز سرویس (`BackgroundService`، پیکربندی، لاگینگ و DPAPI)
+7. ✅ **سند شماره ۷**: چک‌لیست امنیت و تطابق با الزامات شاپرک/فارا (Security & Compliance)
+8. ✅ **سند شماره ۸**: راهنمای نصب، راه‌اندازی و استقرار سرویس در ویندوز (Deployment & Ops Guide)

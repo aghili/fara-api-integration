@@ -206,8 +206,16 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 ),
                 th: ({node, ...props}) => <th className="bg-slate-800 text-slate-200 px-4 py-2.5 border-b border-slate-700 font-semibold" {...props} />,
                 td: ({node, ...props}) => <td className="px-4 py-2 border-b border-slate-800 text-slate-300" {...props} />,
+                pre: ({node, children, ...props}) => (
+                  <div className="my-4 rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
+                    <pre className="p-4 text-xs font-mono overflow-x-auto text-slate-200" {...props}>
+                      {children}
+                    </pre>
+                  </div>
+                ),
                 code: ({inline, className, children, ...props}: any) => {
-                  if (inline) {
+                  const isInline = inline || !className;
+                  if (isInline) {
                     return (
                       <code className="bg-slate-950 text-blue-300 px-1.5 py-0.5 rounded text-xs font-mono border border-slate-800" {...props}>
                         {children}
@@ -215,11 +223,9 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     );
                   }
                   return (
-                    <div className="my-4 rounded-xl overflow-hidden border border-slate-800 bg-slate-950">
-                      <pre className="p-4 text-xs font-mono overflow-x-auto text-slate-200" {...props}>
-                        <code>{children}</code>
-                      </pre>
-                    </div>
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
                   );
                 },
                 ul: ({node, ...props}) => <ul className="list-disc list-inside space-y-1.5 my-3 text-slate-300 pr-2" {...props} />,
